@@ -1,15 +1,17 @@
 body {
-    font-family: Arial;
+    font-family: Arial, sans-serif; /* Agregamos sans-serif como respaldo */
     margin: 40px;
-    background-color: blue;
+    background-color: #f0f4f8; /* Un azul muy claro o gris para que no canse la vista */
 }
 
 table {
     border-collapse: collapse;
     width: 600px;
+    background-color: white; /* Para que la tabla resalte sobre el fondo */
 }
 
 th, td {
-    border: 1px solid blue;
+    border: 1px solid #2980b9; /* Un azul más elegante */
     padding: 8px;
+    text-align: left; /* Alineación estándar */
 }
