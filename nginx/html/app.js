@@ -104,6 +104,31 @@ function hintForFilter(record, n) {
   return "Campos: operadora, agendado, ofertas, reacción, comentario, llamar en";
 }
 
+async function loadRecordDetails(id) {
+  const r = await fetch(`${API}/records/${id}`);
+  if (!r.ok) throw new Error("No se pudo cargar detalle");
+  const data = await r.json();
+
+  const rec = records.find(x => x.id === id);
+  if (!rec) return;
+
+  // actualiza datos del record por si cambió estado/lock
+  rec.status = data.record.status;
+  rec.visibility = data.record.visibility;
+  rec.next_due_at = data.record.next_due_at;
+
+  rec.busy = data.lock
+    ? { filter: rec.status?.startsWith("in_filter_") ? Number(rec.status.slice(-1)) : null, by: data.lock.locked_by_name }
+    : null;
+
+  // ahora filtros reales
+  rec.filters = (data.filters || []).map(f => ({
+    n: f.n,
+    status: f.status,
+    by: f.performed_by_name
+  }));
+}
+
 function render() {
   elGridBody.innerHTML = "";
 
@@ -115,12 +140,14 @@ function render() {
 
     const busyText = r.busy ? `Filtro ${r.busy.filter} - ${r.busy.by}` : "—";
 
+    const shortId = r.id.slice(0, 8) + "…" + r.id.slice(-4);
+
     elGridBody.insertAdjacentHTML("beforeend", `
       <tr class="${rowClass}" data-id="${r.id}">
         <td>
           <button class="toggle" data-toggle="${r.id}">${toggleSymbol}</button>
         </td>
-        <td>${r.id}</td>
+        <td title="${r.id}">${shortId}</td>
         <td>${r.agent}</td>
         <td>${r.group}</td>
         <td>${r.visibility}</td>
@@ -140,10 +167,21 @@ function render() {
 
   // listeners expand/collapse
   document.querySelectorAll("[data-toggle]").forEach(btn => {
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("click", async (e) => {
       const id = e.currentTarget.getAttribute("data-toggle");
       const rec = records.find(x => x.id === id);
+
       rec.expanded = !rec.expanded;
+
+      if (rec.expanded) {
+        try {
+          await loadRecordDetails(id);
+        } catch (err) {
+          alert("Error cargando filtros del registro");
+          rec.expanded = false;
+        }
+      }
+
       render();
     });
   });
@@ -184,12 +222,9 @@ btnReload.addEventListener("click", async () => {
 });
 
 // refresca contador cada 1s (solo visual)
-setInterval(() => {
-  render();
-}, 1000);
 
 (async function init() {
   await checkHealth();
-  await loadRecords()
+  await loadRecords();
   render();
 })();

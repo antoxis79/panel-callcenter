@@ -70,9 +70,20 @@ app.get("/api/records/:id", async (req, res) => {
     [id]
   );
 
+  const existing = new Map(fil.rows.map(f => [f.n, f]));
+  
+  const filled = [1,2,3].map(n => existing.get(n) || ({
+    n,
+    status: "not_started",
+    performed_by_name: null,
+    started_at: null,
+    finished_at: null,
+    next_due_at: null
+  }));
+
   res.json({
     record: rec.rows[0],
-    filters: fil.rows,
+    filters: filed,
     lock: lock.rows[0] || null
   });
 });
