@@ -128,5 +128,5 @@ app.post("/api/seed", async (req, res) => {
   res.json({ ok: true, created: [a.id, b.id] });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log("web listening on", PORT));
