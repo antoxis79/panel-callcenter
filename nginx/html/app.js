@@ -4,39 +4,7 @@ const elApiStatus = document.getElementById("apiStatus");
 const elGridBody = document.getElementById("gridBody");
 const btnReload = document.getElementById("btnReload");
 
-// MOCK temporal: luego lo cambiaremos por GET /api/records
-let records = [
-  {
-    id: "R-0001",
-    agent: "Cesar",
-    group: "gusanitos",
-    visibility: "group",
-    status: "draft",
-    next_due_at: futureMinutes(3),
-    busy: null,
-    filters: [
-      { n: 1, status: "not_started", by: null },
-      { n: 2, status: "not_started", by: null },
-      { n: 3, status: "not_started", by: null },
-    ],
-    expanded: false,
-  },
-  {
-    id: "R-0002",
-    agent: "Emilia",
-    group: "pericotitos",
-    visibility: "private_superior",
-    status: "in_filter_1",
-    next_due_at: futureMinutes(0.5),
-    busy: { filter: 1, by: "Sandy (cerradores)" },
-    filters: [
-      { n: 1, status: "in_progress", by: "Sandy" },
-      { n: 2, status: "not_started", by: null },
-      { n: 3, status: "not_started", by: null },
-    ],
-    expanded: true,
-  },
-];
+let records = [];
 
 function futureMinutes(mins) {
   return new Date(Date.now() + mins * 60 * 1000).toISOString();
@@ -181,8 +149,37 @@ function render() {
   });
 }
 
+async function loadRecords() {
+  const r = await fetch(`${API}/records`);
+  const data = await r.json();
+
+  records = (data.records || []).map(row => {
+    const busy = row.lock_type
+      ? { filter: row.status?.startsWith("in_filter_") ? Number(row.status.slice(-1)) : null, by: row.locked_by_name }
+      : null;
+
+    return {
+      id: row.id,
+      agent: row.created_by_agent_name,
+      group: row.created_by_group,
+      visibility: row.visibility,
+      status: row.status,
+      next_due_at: row.next_due_at,
+      busy,
+      // siempre existen 3 filtros (opción A), pero el detalle real lo traeremos en el paso 7
+      filters: [
+        { n: 1, status: "not_started", by: null },
+        { n: 2, status: "not_started", by: null },
+        { n: 3, status: "not_started", by: null },
+      ],
+      expanded: false
+    };
+  });
+}
+
 btnReload.addEventListener("click", async () => {
   await checkHealth();
+  await loadRecords();
   render();
 });
 
@@ -193,5 +190,6 @@ setInterval(() => {
 
 (async function init() {
   await checkHealth();
+  await loadRecords()
   render();
 })();
