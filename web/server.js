@@ -1,38 +1,25 @@
 const express = require("express");
-const { Pool } = require("pg");
+const cors = require("cors");
 
 const app = express();
-const port = parseInt(process.env.PORT || "8080", 10);
 
-if (!process.env.DATABASE_URL) {
-  console.error("Falta DATABASE_URL");
-  process.exit(1);
-}
+app.use(cors());
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("OK: Express funcionando");
+app.get("/api/health", (req,res) => {
+  res.json({ok:true, service:"panel-callcenter-web", time:new Date().toISOString()});
 });
 
-app.get("/db", async (req, res) => {
-  try {
-    const r = await pool.query("SELECT now() as now");
-    res.json({ ok: true, now: r.rows[0].now });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
+app.post("/api/auth/login", (req,res) => {
+  res.status(501).json({
+    error:"not_implemented",
+    note:"Aquí conectaremos LDAP (Samba AD) en el siguiente paso."
+  });
 });
 
-app.get("/api/vendedor", async (req, res) => {
-  try {
-    const r = await pool.query("SELECT * FROM vendedores ORDER BY id DESC LIMIT 20");
-    res.json({ ok: true, rows: r.rows });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+const PORT = process.env.PORT || 3000;
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Web escuchando en ${port}`);
+app.listen(PORT, () => {
+  console.log(`panel-callcenter-web listening on port ${PORT}`);
 });
