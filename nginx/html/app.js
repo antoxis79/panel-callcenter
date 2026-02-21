@@ -58,11 +58,11 @@ function actionButtons(record, f) {
 
   if (isBlocked) return `<span class="badge gray">—</span>`;
 
-  if (!locked && f.status === "not_started") {
+  if (!locked && f.status === "not_started" && record.status === "draft" && f.n === 1) {
     return `<button class="mini" data-start="${record.id}" data-n="${f.n}">Iniciar</button>`;
   }
 
-  if (locked && f.status === "in_progress") {
+  if (locked) {
     return `
       <button class="mini" data-finish="${record.id}" data-n="${f.n}">Finalizar</button>
       <button class="mini danger" data-cancel="${record.id}">Cancelar</button>
