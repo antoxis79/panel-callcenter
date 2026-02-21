@@ -122,20 +122,37 @@ app.post("/api/records/:id/filters/:n/start", async (req, res) => {
     return res.status(409).json({ error: "locked", lock: lock.rows[0] });
   }
 
-  // 3) Validar secuencia no reversible
-  // draft => solo filtro 1
-  // si ya está in_filter_X => no permitir
+  // 3) Validar secuencia real (no reversible)
+  // - No permitir si ya está en un filtro
   const status = rec.rows[0].status;
-  if (status.startsWith("in_filter_")) {
+  if ((status || "").startsWith("in_filter_")) {
     return res.status(409).json({ error: "already_in_filter", status });
   }
-
-  // Para este MVP: si está draft, solo F1; si está done/cancelled/paused => no
-  if (status !== "draft") {
+  if (["cancelled","done"].includes(status)) {
     return res.status(409).json({ error: "cannot_start_from_status", status });
   }
-  if (n !== 1) {
-    return res.status(409).json({ error: "sequence_blocked", note: "Primero Filtro 1" });
+
+  // Revisar progreso real en filters
+  const f1 = await pool.query("SELECT status FROM filters WHERE record_id=$1 AND n=1", [id]);
+  const f2 = await pool.query("SELECT status FROM filters WHERE record_id=$1 AND n=2", [id]);
+  const f3 = await pool.query("SELECT status FROM filters WHERE record_id=$1 AND n=3", [id]);
+
+  const s1 = f1.rows[0]?.status || "not_started";
+  const s2 = f2.rows[0]?.status || "not_started";
+  const s3 = f3.rows[0]?.status || "not_started";
+
+  // Regla secuencial:
+  // n=1 permitido si s1 = not_started
+  // n=2 permitido si s1 = completed y s2 = not_started
+  // n=3 permitido si s2 = completed y s3 = not_started
+  if (n === 1) {
+    if (s1 !== "not_started") return res.status(409).json({ error: "sequence_blocked", need: "f1_not_started", s1 });
+  }
+  if (n === 2) {
+    if (s1 !== "completed" || s2 !== "not_started") return res.status(409).json({ error: "sequence_blocked", need: "f1_completed_and_f2_not_started", s1, s2 });
+  }
+  if (n === 3) {
+    if (s2 !== "completed" || s3 !== "not_started") return res.status(409).json({ error: "sequence_blocked", need: "f2_completed_and_f3_not_started", s2, s3 });
   }
 
   // 4) Set record status + lock + filter row status
@@ -203,22 +220,25 @@ app.post("/api/records/:id/filters/:n/finish", async (req, res) => {
       [id, n]
     );
 
-    // Si n=3 => done, si no => vuelve a draft y setea next_due_at
-    if (n === 3) {
-      await pool.query(
-        "UPDATE records SET status='done', current_filter=3, finalized_at=now() WHERE id=$1",
-        [id]
-      );
-    } else {
-      await pool.query(
-        "UPDATE records SET status='draft', current_filter=$2, next_due_at=$3 WHERE id=$1",
-        [id, n, nextDue]
-      );
-      await pool.query(
-        "UPDATE filters SET next_due_at=$1 WHERE record_id=$2 AND n=$3",
-        [nextDue, id, n]
-      );
-    }
+  if (n === 3) {
+    await pool.query(
+      "UPDATE records SET status='done', current_filter=3, finalized_at=now() WHERE id=$1",
+      [id]
+    );
+  } else {
+    // deja listo que el siguiente filtro sea el que toca
+    const nextN = n + 1;
+
+    await pool.query(
+      "UPDATE records SET status='draft', current_filter=$2, next_due_at=$3 WHERE id=$1",
+      [id, nextN, nextDue]
+    );
+
+    await pool.query(
+      "UPDATE filters SET next_due_at=$1 WHERE record_id=$2 AND n=$3",
+      [nextDue, id, nextN]
+    );
+  }
 
     await pool.query("DELETE FROM locks WHERE record_id=$1", [id]);
 

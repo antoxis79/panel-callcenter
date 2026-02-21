@@ -53,20 +53,22 @@ function remainingText(iso) {
 }
 
 function actionButtons(record, f) {
-  const isBlocked = isFilterBlocked(record, f.n);
   const locked = (record.status === `in_filter_${f.n}`) && record.busy;
 
-  if (isBlocked) return `<span class="badge gray">—</span>`;
-
-  if (!locked && f.status === "not_started" && record.status === "draft" && f.n === 1) {
-    return `<button class="mini" data-start="${record.id}" data-n="${f.n}">Iniciar</button>`;
-  }
-
+  // si está locked, mostrar acciones
   if (locked) {
     return `
       <button class="mini" data-finish="${record.id}" data-n="${f.n}">Finalizar</button>
       <button class="mini danger" data-cancel="${record.id}">Cancelar</button>
     `;
+  }
+
+  // bloqueado por secuencia o estado
+  if (isFilterBlocked(record, f.n)) return `<span class="badge gray">—</span>`;
+
+  // habilitado para iniciar
+  if (f.status === "not_started") {
+    return `<button class="mini" data-start="${record.id}" data-n="${f.n}">Iniciar</button>`;
   }
 
   return `<span class="badge gray">—</span>`;
@@ -104,17 +106,23 @@ function badgeForFilter(status) {
   }
 }
 
-// Regla simple para el mock:
-// - si record.status está en filtro 1/2/3, el resto queda “bloqueado”
-// - si draft, todos visibles pero “bloqueados” según progreso (aquí aún no modelamos progreso real)
+function getFilterStatus(record, n) {
+  const f = (record.filters || []).find(x => x.n === n);
+  return f ? f.status : "not_started";
+}
+
 function isFilterBlocked(record, n) {
-  // ejemplo muy básico: si está en draft, solo F1 “disponible”, F2/F3 bloqueados
-  if (record.status === "draft") return n !== 1;
-  if (record.status === "in_filter_1") return n !== 1;
-  if (record.status === "in_filter_2") return n !== 2;
-  if (record.status === "in_filter_3") return n !== 3;
-  if (record.status === "done") return false;
-  return false;
+  // si está cancelado o done, no se edita
+  if (record.status === "cancelled" || record.status === "done") return true;
+
+  const s1 = getFilterStatus(record, 1);
+  const s2 = getFilterStatus(record, 2);
+  const s3 = getFilterStatus(record, 3);
+
+  if (n === 1) return s1 !== "not_started";
+  if (n === 2) return !(s1 === "completed" && s2 === "not_started");
+  if (n === 3) return !(s2 === "completed" && s3 === "not_started");
+  return true;
 }
 
 function hintForFilter(record, n) {
@@ -335,7 +343,6 @@ btnReload.addEventListener("click", async () => {
 setInterval(async () => {
   await loadRecords();
 
-  // refrescar detalles de los expandidos
   const expandedIds = records.filter(r => r.expanded).map(r => r.id);
   for (const id of expandedIds) {
     try { await loadRecordDetails(id); } catch {}
