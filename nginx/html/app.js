@@ -10,6 +10,29 @@ function futureMinutes(mins) {
   return new Date(Date.now() + mins * 60 * 1000).toISOString();
 }
 
+let activeLockRecordId = null;
+let lockRenewTimer = null;
+
+function startLockRenew(id) {
+  stopLockRenew();
+  activeLockRecordId = id;
+
+  lockRenewTimer = setInterval(async () => {
+    try {
+      await fetch(`${API}/records/${id}/lock/renew`, {
+        method: "POST",
+        headers: { "X-User": "cesar", "X-Name": "Cesar" }
+      });
+    } catch {}
+  }, 25000); // cada 25s
+}
+
+function stopLockRenew() {
+  if (lockRenewTimer) clearInterval(lockRenewTimer);
+  lockRenewTimer = null;
+  activeLockRecordId = null;
+}
+
 async function checkHealth() {
   try {
     const r = await fetch(`${API}/health`);
@@ -179,7 +202,7 @@ function render() {
         <td>${r.group}</td>
         <td>${r.visibility}</td>
         <td>${badgeForStatus(r.status)}</td>
-        <td>${remainingText(r.next_due_at)}</td>
+        <td class="${dueClass(r.next_due_at)}">${remainingText(r.next_due_at)}</td>
         <td>${busyText}</td>
       </tr>
     `);
@@ -232,6 +255,8 @@ elGridBody.addEventListener("click", async (e) => {
       return;
     }
 
+    startLockRenew(id);
+
     await loadRecords();
     // importante: mantén el expand abierto si estaba abierto
     const rec = records.find(x => x.id === id);
@@ -266,6 +291,8 @@ elGridBody.addEventListener("click", async (e) => {
       return;
     }
 
+    stopLockRenew();
+
     await loadRecords();
     const rec = records.find(x => x.id === id);
     if (rec) rec.expanded = true;
@@ -296,6 +323,8 @@ elGridBody.addEventListener("click", async (e) => {
       alert("No se pudo cancelar. Mira consola (F12).");
       return;
     }
+
+    stopLockRenew();
 
     await loadRecords();
     render();
@@ -339,6 +368,14 @@ btnReload.addEventListener("click", async () => {
   await loadRecords();
   render();
 });
+
+function dueClass(iso) {
+  if (!iso) return "due-ok";
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff < 0) return "due-late";
+  if (diff <= 60 * 1000) return "due-soon";
+  return "due-ok";
+}
 
 setInterval(async () => {
   await loadRecords();

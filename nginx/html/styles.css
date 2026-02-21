@@ -152,3 +152,12 @@ tr.busy{
 .mini.danger{
   border-color: var(--busyLine);
 }
+
+/* Llamar en: estados */
+.due-ok { opacity: 0.9; }
+.due-soon { font-weight: 700; }   /* < 1 minuto */
+.due-late { font-weight: 800; }   /* atrasado */
+
+/* Fila ocupada */
+tr.busy { outline: 1px solid var(--busyLine); }
+tr.child.busy { outline: 1px solid var(--busyLine); }

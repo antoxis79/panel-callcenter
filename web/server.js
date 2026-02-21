@@ -352,5 +352,26 @@ app.post("/api/seed", async (req, res) => {
   res.json({ ok: true, created: [a.id, b.id] });
 });
 
+app.post("/api/records/:id/lock/renew", async (req, res) => {
+  await cleanupExpiredLocks();
+  const { user } = getActor(req);
+  const id = req.params.id;
+
+  const lock = await pool.query("SELECT * FROM locks WHERE record_id=$1", [id]);
+  if (lock.rowCount === 0) return res.status(404).json({ error: "no_lock" });
+
+  // Solo el dueño del lock puede renovarlo
+  if (lock.rows[0].locked_by_user !== user) {
+    return res.status(403).json({ error: "not_lock_owner" });
+  }
+
+  await pool.query(
+    "UPDATE locks SET expires_at=$1 WHERE record_id=$2",
+    [ttl60s(), id]
+  );
+
+  res.json({ ok: true });
+});
+
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log("web listening on", PORT));
