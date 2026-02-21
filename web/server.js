@@ -340,7 +340,14 @@ app.post("/api/seed", async (req, res) => {
   };
 
   const a = await makeRecord("Cesar", "gusanitos", "group", "draft", 3, null);
+
   const b = await makeRecord("Emilia", "pericotitos", "private_superior", "in_filter_1", 0.5, "Sandy (cerradores)", "filter", 1);
+
+  const c = await makeRecord("Emilia", "pericotitos", "group", "draft", 10, null);
+  await pool.query("UPDATE filters SET status='completed' WHERE record_id=$1 AND n=1", [c.id]);
+
+  const d = await makeRecord("Cesar", "gusanitos", "group", "draft", 10, null);
+  await pool.query("UPDATE filters SET status='completed' WHERE record_id=$1 AND n IN (1,2)", [d.id]);
 
   res.json({ ok: true, created: [a.id, b.id] });
 });
