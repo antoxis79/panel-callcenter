@@ -52,12 +52,30 @@ function remainingText(iso) {
   return `Faltan ${txt}`;
 }
 
+function actionButtons(record, f) {
+  const isBlocked = isFilterBlocked(record, f.n);
+  const locked = (record.status === `in_filter_${f.n}`) && record.busy;
+
+  if (isBlocked) return `<span class="badge gray">—</span>`;
+
+  if (!locked && f.status === "not_started") {
+    return `<button class="mini" data-start="${record.id}" data-n="${f.n}">Iniciar</button>`;
+  }
+
+  if (locked && f.status === "in_progress") {
+    return `
+      <button class="mini" data-finish="${record.id}" data-n="${f.n}">Finalizar</button>
+      <button class="mini danger" data-cancel="${record.id}">Cancelar</button>
+    `;
+  }
+
+  return `<span class="badge gray">—</span>`;
+}
+
 function childRowHtml(record, f) {
-  // Fila “desplegable” de filtro
   const locked = (record.status === `in_filter_${f.n}`) && record.busy;
   const lockText = locked ? `En proceso por ${record.busy.by}` : "—";
 
-  // Si no corresponde aún (ej: f2 pero f1 no completado), lo marcamos gris
   const isBlocked = isFilterBlocked(record, f.n);
   const statusBadge = isBlocked
     ? `<span class="badge gray">Bloqueado</span>`
@@ -66,9 +84,10 @@ function childRowHtml(record, f) {
   return `
     <tr class="child ${locked ? "busy" : ""}">
       <td></td>
-      <td colspan="2">↳ <b>Filtro ${f.n}</b></td>
-      <td colspan="2">${statusBadge}</td>
-      <td>${lockText}</td>
+      <td>↳ <b>Filtro ${f.n}</b></td>
+      <td>${statusBadge}</td>
+      <td colspan="2">${lockText}</td>
+      <td>${actionButtons(record, f)}</td>
       <td colspan="2">${hintForFilter(record, f.n)}</td>
     </tr>
   `;
@@ -100,7 +119,7 @@ function isFilterBlocked(record, n) {
 
 function hintForFilter(record, n) {
   if (record.status === "draft" && n !== 1) return "Disponible después de completar el filtro anterior";
-  if (record.status.startsWith("in_filter") && !record.status.endsWith(String(n))) return "Bloqueado mientras otro filtro está en proceso";
+  if ((record.status || "").startsWith("in_filter") && !String(record.status).endsWith(String(n))) return "Bloqueado mientras otro filtro está en proceso";
   return "Campos: operadora, agendado, ofertas, reacción, comentario, llamar en";
 }
 
@@ -164,30 +183,103 @@ function render() {
       });
     }
   });
-
-  // listeners expand/collapse
-  document.querySelectorAll("[data-toggle]").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      const id = e.currentTarget.getAttribute("data-toggle");
-      const rec = records.find(x => x.id === id);
-
-      rec.expanded = !rec.expanded;
-
-      if (rec.expanded) {
-        try {
-          await loadRecordDetails(id);
-        } catch (err) {
-          alert("Error cargando filtros del registro");
-          rec.expanded = false;
-        }
-      }
-
-      render();
-    });
-  });
 }
 
+elGridBody.addEventListener("click", async (e) => {
+  const t = e.target;
+
+  // TOGGLE
+  if (t.matches("[data-toggle]")) {
+    const id = t.getAttribute("data-toggle");
+    const rec = records.find(x => x.id === id);
+    if (!rec) return;
+
+    rec.expanded = !rec.expanded;
+
+    if (rec.expanded) {
+      try {
+        await loadRecordDetails(id);
+      } catch (err) {
+        alert("Error cargando filtros del registro");
+        rec.expanded = false;
+      }
+    }
+    render();
+    return;
+  }
+
+  // START
+  if (t.matches("[data-start]")) {
+    const id = t.getAttribute("data-start");
+    const n = t.getAttribute("data-n");
+
+    await fetch(`${API}/records/${id}/filters/${n}/start`, {
+      method: "POST",
+      headers: { "X-User": "cesar", "X-Name": "Cesar" }
+    });
+
+    await loadRecords();
+    // importante: mantén el expand abierto si estaba abierto
+    const rec = records.find(x => x.id === id);
+    if (rec) rec.expanded = true;
+    await loadRecordDetails(id);
+
+    render();
+    return;
+  }
+
+  // FINISH
+  if (t.matches("[data-finish]")) {
+    const id = t.getAttribute("data-finish");
+    const n = t.getAttribute("data-n");
+
+    const mins = prompt("¿En cuántos minutos debe hacerse el siguiente filtro? (ej: 10). Vacío = sin hora");
+    const next_due_minutes = mins && !isNaN(Number(mins)) ? Number(mins) : null;
+
+    await fetch(`${API}/records/${id}/filters/${n}/finish`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User": "cesar",
+        "X-Name": "Cesar"
+      },
+      body: JSON.stringify({ next_due_minutes })
+    });
+
+    await loadRecords();
+    const rec = records.find(x => x.id === id);
+    if (rec) rec.expanded = true;
+    await loadRecordDetails(id);
+
+    render();
+    return;
+  }
+
+  // CANCEL
+  if (t.matches("[data-cancel]")) {
+    const id = t.getAttribute("data-cancel");
+    const reason = prompt("Motivo de cancelación:");
+    if (!reason) return;
+
+    await fetch(`${API}/records/${id}/cancel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User": "cesar",
+        "X-Name": "Cesar"
+      },
+      body: JSON.stringify({ reason })
+    });
+
+    await loadRecords();
+    render();
+    return;
+  }
+});
+
 async function loadRecords() {
+  const expandedMap = new Map(records.map(r => [r.id, r.expanded]));
+
   const r = await fetch(`${API}/records`);
   const data = await r.json();
 
@@ -196,21 +288,22 @@ async function loadRecords() {
       ? { filter: row.status?.startsWith("in_filter_") ? Number(row.status.slice(-1)) : null, by: row.locked_by_name }
       : null;
 
+    const id = row.id;
+
     return {
-      id: row.id,
+      id,
       agent: row.created_by_agent_name,
       group: row.created_by_group,
       visibility: row.visibility,
       status: row.status,
       next_due_at: row.next_due_at,
       busy,
-      // siempre existen 3 filtros (opción A), pero el detalle real lo traeremos en el paso 7
       filters: [
         { n: 1, status: "not_started", by: null },
         { n: 2, status: "not_started", by: null },
         { n: 3, status: "not_started", by: null },
       ],
-      expanded: false
+      expanded: expandedMap.get(id) || false
     };
   });
 }
@@ -221,7 +314,17 @@ btnReload.addEventListener("click", async () => {
   render();
 });
 
-// refresca contador cada 1s (solo visual)
+setInterval(async () => {
+  await loadRecords();
+
+  // refrescar detalles de los expandidos
+  const expandedIds = records.filter(r => r.expanded).map(r => r.id);
+  for (const id of expandedIds) {
+    try { await loadRecordDetails(id); } catch {}
+  }
+
+  render();
+}, 5000);
 
 (async function init() {
   await checkHealth();

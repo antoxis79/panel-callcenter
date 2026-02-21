@@ -138,3 +138,17 @@ tr.busy{
 .badge.warn{color:var(--warn)}
 .badge.bad{color:var(--bad)}
 .badge.ok{color:var(--ok)}
+
+.mini{
+  padding:6px 10px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--card);
+  color:var(--text);
+  cursor:pointer;
+  font-size:12px;
+  margin-right:6px;
+}
+.mini.danger{
+  border-color: var(--busyLine);
+}

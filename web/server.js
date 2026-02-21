@@ -27,6 +27,21 @@ async function cleanupExpiredLocks() {
   await pool.query("DELETE FROM locks WHERE expires_at < now()");
 }
 
+function getActor(req) {
+  // temporal (luego vendrá del login/JWT/LDAP)
+  const user = req.header("X-User") || "demo";
+  const name = req.header("X-Name") || user;
+  return { user, name };
+}
+
+function ttl60s() {
+  return new Date(Date.now() + 60 * 1000);
+}
+
+function statusForFilter(n) {
+  return `in_filter_${n}`;
+}
+
 // GET /api/records -> lista para tabla principal
 app.get("/api/records", async (req, res) => {
   await cleanupExpiredLocks();
@@ -87,6 +102,176 @@ app.get("/api/records/:id", async (req, res) => {
     filters: filled,
     lock: lock.rows[0] || null
   });
+});
+
+app.post("/api/records/:id/filters/:n/start", async (req, res) => {
+  await cleanupExpiredLocks();
+  const { user, name } = getActor(req);
+
+  const id = req.params.id;
+  const n = Number(req.params.n);
+  if (![1,2,3].includes(n)) return res.status(400).json({ error: "bad_filter_n" });
+
+  // 1) Traer record
+  const rec = await pool.query("SELECT * FROM records WHERE id=$1", [id]);
+  if (rec.rowCount === 0) return res.status(404).json({ error: "not_found" });
+
+  // 2) Ver si ya hay lock
+  const lock = await pool.query("SELECT * FROM locks WHERE record_id=$1", [id]);
+  if (lock.rowCount > 0) {
+    return res.status(409).json({ error: "locked", lock: lock.rows[0] });
+  }
+
+  // 3) Validar secuencia no reversible
+  // draft => solo filtro 1
+  // si ya está in_filter_X => no permitir
+  const status = rec.rows[0].status;
+  if (status.startsWith("in_filter_")) {
+    return res.status(409).json({ error: "already_in_filter", status });
+  }
+
+  // Para este MVP: si está draft, solo F1; si está done/cancelled/paused => no
+  if (status !== "draft") {
+    return res.status(409).json({ error: "cannot_start_from_status", status });
+  }
+  if (n !== 1) {
+    return res.status(409).json({ error: "sequence_blocked", note: "Primero Filtro 1" });
+  }
+
+  // 4) Set record status + lock + filter row status
+  await pool.query("BEGIN");
+  try {
+    await pool.query(
+      "UPDATE records SET status=$1, current_filter=$2 WHERE id=$3",
+      [statusForFilter(n), n, id]
+    );
+
+    await pool.query(
+      `INSERT INTO locks (record_id, lock_type, locked_by_user, locked_by_name, expires_at)
+       VALUES ($1,'filter',$2,$3,$4)`,
+      [id, user, name, ttl60s()]
+    );
+
+    await pool.query(
+      `UPDATE filters
+       SET status='in_progress', performed_by_user=$1, performed_by_name=$2, started_at=now()
+       WHERE record_id=$3 AND n=$4`,
+      [user, name, id, n]
+    );
+
+    await pool.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    res.status(500).json({ error: "start_failed", detail: String(e.message || e) });
+  }
+});
+
+app.post("/api/records/:id/filters/:n/finish", async (req, res) => {
+  await cleanupExpiredLocks();
+  const { user, name } = getActor(req);
+
+  const id = req.params.id;
+  const n = Number(req.params.n);
+  const { next_due_minutes } = req.body || {}; // opcional
+
+  const rec = await pool.query("SELECT * FROM records WHERE id=$1", [id]);
+  if (rec.rowCount === 0) return res.status(404).json({ error: "not_found" });
+
+  // Debe estar en ese filtro
+  if (rec.rows[0].status !== statusForFilter(n)) {
+    return res.status(409).json({ error: "not_in_that_filter", status: rec.rows[0].status });
+  }
+
+  // Debe tener lock y ser el mismo usuario (MVP)
+  const lock = await pool.query("SELECT * FROM locks WHERE record_id=$1", [id]);
+  if (lock.rowCount === 0) return res.status(409).json({ error: "no_lock" });
+  if (lock.rows[0].locked_by_user !== user) {
+    return res.status(403).json({ error: "not_lock_owner" });
+  }
+
+  const nextDue = (typeof next_due_minutes === "number")
+    ? new Date(Date.now() + next_due_minutes * 60 * 1000)
+    : null;
+
+  await pool.query("BEGIN");
+  try {
+    await pool.query(
+      `UPDATE filters
+       SET status='completed', finished_at=now()
+       WHERE record_id=$1 AND n=$2`,
+      [id, n]
+    );
+
+    // Si n=3 => done, si no => vuelve a draft y setea next_due_at
+    if (n === 3) {
+      await pool.query(
+        "UPDATE records SET status='done', current_filter=3, finalized_at=now() WHERE id=$1",
+        [id]
+      );
+    } else {
+      await pool.query(
+        "UPDATE records SET status='draft', current_filter=$2, next_due_at=$3 WHERE id=$1",
+        [id, n, nextDue]
+      );
+      await pool.query(
+        "UPDATE filters SET next_due_at=$1 WHERE record_id=$2 AND n=$3",
+        [nextDue, id, n]
+      );
+    }
+
+    await pool.query("DELETE FROM locks WHERE record_id=$1", [id]);
+
+    await pool.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    res.status(500).json({ error: "finish_failed", detail: String(e.message || e) });
+  }
+});
+
+app.post("/api/records/:id/cancel", async (req, res) => {
+  await cleanupExpiredLocks();
+  const { user, name } = getActor(req);
+
+  const id = req.params.id;
+  const { reason } = req.body || {};
+  if (!reason || String(reason).trim().length < 3) {
+    return res.status(400).json({ error: "reason_required" });
+  }
+
+  const rec = await pool.query("SELECT * FROM records WHERE id=$1", [id]);
+  if (rec.rowCount === 0) return res.status(404).json({ error: "not_found" });
+
+  await pool.query("BEGIN");
+  try {
+    // si estaba en un filtro, marcamos ese filtro cancelado
+    const st = rec.rows[0].status;
+    if (st.startsWith("in_filter_")) {
+      const n = Number(st.slice(-1));
+      await pool.query(
+        `UPDATE filters
+         SET status='cancelled', cancel_reason=$1, finished_at=now()
+         WHERE record_id=$2 AND n=$3`,
+        [reason, id, n]
+      );
+    }
+
+    await pool.query(
+      `UPDATE records
+       SET status='cancelled', cancel_reason=$1, cancelled_by_user=$2, cancelled_at=now()
+       WHERE id=$3`,
+      [reason, user, id]
+    );
+
+    await pool.query("DELETE FROM locks WHERE record_id=$1", [id]);
+
+    await pool.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    res.status(500).json({ error: "cancel_failed", detail: String(e.message || e) });
+  }
 });
 
 // POST /api/seed (temporal) -> crea 2 records + filters 1..3
