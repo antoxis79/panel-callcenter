@@ -213,10 +213,16 @@ elGridBody.addEventListener("click", async (e) => {
     const id = t.getAttribute("data-start");
     const n = t.getAttribute("data-n");
 
-    await fetch(`${API}/records/${id}/filters/${n}/start`, {
+    const resp = await fetch(`${API}/records/${id}/filters/${n}/start`, {
       method: "POST",
       headers: { "X-User": "cesar", "X-Name": "Cesar" }
     });
+
+    if (!resp.ok) {
+      console.log("START ERROR", resp.status, await resp.text());
+      alert("No se pudo iniciar. Mira consola (F12).");
+      return;
+    }
 
     await loadRecords();
     // importante: mantén el expand abierto si estaba abierto
@@ -236,7 +242,7 @@ elGridBody.addEventListener("click", async (e) => {
     const mins = prompt("¿En cuántos minutos debe hacerse el siguiente filtro? (ej: 10). Vacío = sin hora");
     const next_due_minutes = mins && !isNaN(Number(mins)) ? Number(mins) : null;
 
-    await fetch(`${API}/records/${id}/filters/${n}/finish`, {
+    const resp = await fetch(`${API}/records/${id}/filters/${n}/finish`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -245,6 +251,12 @@ elGridBody.addEventListener("click", async (e) => {
       },
       body: JSON.stringify({ next_due_minutes })
     });
+
+    if (!resp.ok) {
+      console.log("FINISH ERROR", resp.status, await resp.text());
+      alert("No se pudo finalizar. Mira consola (F12).");
+      return;
+    }
 
     await loadRecords();
     const rec = records.find(x => x.id === id);
@@ -270,6 +282,12 @@ elGridBody.addEventListener("click", async (e) => {
       },
       body: JSON.stringify({ reason })
     });
+
+    if (!resp.ok) {
+      console.log("CANCEL ERROR", resp.status, await resp.text());
+      alert("No se pudo cancelar. Mira consola (F12).");
+      return;
+    }
 
     await loadRecords();
     render();
