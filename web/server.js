@@ -3,6 +3,7 @@ const cors = require("cors");
 const { Pool } = require("pg");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -83,7 +84,7 @@ app.get("/api/records/:id", async (req, res) => {
 
   res.json({
     record: rec.rows[0],
-    filters: filed,
+    filters: filled,
     lock: lock.rows[0] || null
   });
 });
